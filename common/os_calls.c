@@ -190,13 +190,21 @@ g_deinit(void)
 
 /*****************************************************************************/
 /* allocate memory, returns a pointer to it, size bytes are allocated,
-   if zero is non zero, each byte will be set to zero */
+   if zero is non zero, each byte will be set to zero
+
+   In a case of out of memory error, this function panics instead
+   of returning NULL */
 void *
 g_malloc(int size, int zero)
 {
     char *rv;
 
     rv = (char *)malloc(size);
+    if (rv == NULL)
+    {
+	LOG(LOG_LEVEL_ERROR, "system out of memory");
+	abort();
+    }
 
     if (zero)
     {

@@ -213,8 +213,8 @@ int      g_tcp6_bind_address(int sck, const char *port, const char *address);
 
 /* glib-style wrappers */
 #define g_new(struct_type, n_structs) \
-    (struct_type *) malloc(sizeof(struct_type) * (n_structs))
+    (struct_type *) g_malloc(sizeof(struct_type) * (n_structs), 0)
 #define g_new0(struct_type, n_structs) \
-    (struct_type *) calloc((n_structs), sizeof(struct_type))
+    (struct_type *) g_malloc(sizeof(struct_type) * (n_structs), 1)
 
 #endif
