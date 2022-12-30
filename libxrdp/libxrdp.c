@@ -24,12 +24,122 @@
 
 #include "libxrdp.h"
 #include "string_calls.h"
+#include "thread_calls.h"
 #include "xrdp_orders_rail.h"
 #include "ms-rdpedisp.h"
 #include "ms-rdpbcgr.h"
 
 #define MAX_BITMAP_BUF_SIZE (16 * 1024) /* 16K */
 #define TS_MONITOR_ATTRIBUTES_SIZE 20 /* [MS-RDPBCGR] 2.2.1.3.9 */
+
+/******************************************************************************/
+static void
+libxrdp_read_config(struct xrdp_session *session)
+{
+    struct list *names;
+    struct list *values;
+
+    names = list_create();
+    names->auto_free = 1;
+    values = list_create();
+    values->auto_free = 1;
+
+    if (file_by_name_read_section(session->xrdp_ini,
+                                  "Globals", names, values) == 0)
+    {
+        int i;
+
+        for (i = 0; i < names->count; i++)
+        {
+            char *name = (char *)list_get_item(names, i);
+            char *value = (char *)list_get_item(values, i);
+
+            if (g_strcasecmp(name, "perf_dump_interval") == 0)
+            {
+		LOG(LOG_LEVEL_DEBUG, "PERF: %s = %s", name, value);
+                session->perf_dump_interval = g_atoi(value);
+            }
+        }
+    }
+
+    list_delete(names);
+    list_delete(values);
+}
+
+/******************************************************************************/
+THREAD_RV THREAD_CC
+libxrdp_perf_thread(void *arg)
+{
+    struct xrdp_session *session = arg;
+    uint64_t tx_bytes, rx_bytes, tx_frames;
+    uint64_t prev_tx_bytes = 0, prev_rx_bytes = 0, prev_tx_frames = 0;
+    double fps, tx_bps, rx_bps;
+    double interval = session->perf_dump_interval;
+
+    LOG(LOG_LEVEL_INFO, "PERF: thread started");
+
+    while (!g_is_wait_obj_set(session->perf_thread_term))
+    {
+	tx_bytes = __atomic_load_n(&session->trans->tx_bytes, __ATOMIC_RELAXED);
+	rx_bytes = __atomic_load_n(&session->trans->rx_bytes, __ATOMIC_RELAXED);
+	tx_frames = __atomic_load_n(&session->tx_frames, __ATOMIC_RELAXED);
+
+	fps = (double) (tx_frames - prev_tx_frames) / interval;
+	tx_bps = (double) (tx_bytes - prev_tx_bytes) / interval / 1e6;
+	rx_bps = (double) (rx_bytes - prev_rx_bytes) / interval / 1e6;
+
+	LOG(LOG_LEVEL_INFO,
+                "PERF: FPS=%.3g; TX-BPS=%.3g RX-BPS=%.3g Mbits/sec",
+                fps, tx_bps, rx_bps);
+
+	prev_tx_bytes = tx_bytes;
+	prev_rx_bytes = rx_bytes;
+	prev_tx_frames = tx_frames;
+
+        g_obj_wait(&session->perf_thread_term, 1, NULL, 0,
+            session->perf_dump_interval * 1000);
+    }
+
+    LOG(LOG_LEVEL_INFO, "PERF: thread finished");
+
+    return 0;
+}
+
+/******************************************************************************/
+static void
+libxrdp_perf_thread_start(struct xrdp_session *session)
+{
+    char buf[1024];
+
+    if (session->perf_dump_interval == 0)
+    {
+        return;
+    }
+
+    g_snprintf(buf, 1024, "xrdp_%8.8x_perf_thread_term", g_getpid());
+    session->perf_thread_term = g_create_wait_obj(buf);
+
+    if (session->perf_thread_term == 0)
+    {
+        LOG(LOG_LEVEL_ERROR, "libxrdp_perf_thread_start: g_create_wait_obj() error");
+        return;
+    }
+
+    tc_thread_create(libxrdp_perf_thread, session);
+}
+
+static void
+libxrdp_perf_thread_stop(struct xrdp_session *session)
+{
+    if (session->perf_thread_term != 0)
+    {
+        g_set_wait_obj(session->perf_thread_term);
+        g_sleep(1000);
+
+        g_delete_wait_obj(session->perf_thread_term);
+        session->perf_thread_term = 0;
+    }
+}
 
 /******************************************************************************/
 struct xrdp_session *EXPORT_CC
@@ -48,10 +158,16 @@ libxrdp_init(tbus id, struct trans *trans, const char *xrdp_ini)
     {
         session->xrdp_ini = g_strdup(XRDP_CFG_PATH "/xrdp.ini");
     }
+
+    libxrdp_read_config(session);
+
     session->rdp = xrdp_rdp_create(session, trans);
     session->orders = xrdp_orders_create(session, (struct xrdp_rdp *)session->rdp);
     session->client_info = &(((struct xrdp_rdp *)session->rdp)->client_info);
     session->check_for_app_input = 1;
+
+    libxrdp_perf_thread_start(session);
+
     return session;
 }
 
@@ -63,6 +179,8 @@ libxrdp_exit(struct xrdp_session *session)
     {
         return 0;
     }
+
+    libxrdp_perf_thread_stop(session);
 
     xrdp_orders_delete((struct xrdp_orders *)session->orders);
     xrdp_rdp_delete((struct xrdp_rdp *)session->rdp);

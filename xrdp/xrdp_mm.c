@@ -3205,6 +3205,9 @@ server_begin_update(struct xrdp_mod *mod)
     p = xrdp_painter_create(wm, wm->session);
     xrdp_painter_begin_update(p);
     mod->painter = (long)p;
+
+    __atomic_add_fetch(&wm->session->tx_frames, 1, __ATOMIC_RELAXED);
+
     return 0;
 }
 

@@ -45,7 +45,15 @@ trans_tls_recv(struct trans *self, char *ptr, int len)
     {
         return 1;
     }
-    return ssl_tls_read(self->tls, ptr, len);
+
+    int rc = ssl_tls_read(self->tls, ptr, len);
+
+    if (rc > 0)
+    {
+        __atomic_add_fetch(&self->rx_bytes, (uint64_t) rc, __ATOMIC_RELAXED);
+    }
+
+    return rc;
 }
 
 /*****************************************************************************/
@@ -56,7 +64,15 @@ trans_tls_send(struct trans *self, const char *data, int len)
     {
         return 1;
     }
-    return ssl_tls_write(self->tls, data, len);
+
+    int rc = ssl_tls_write(self->tls, data, len);
+
+    if (rc > 0)
+    {
+        __atomic_add_fetch(&self->tx_bytes, (uint64_t) rc, __ATOMIC_RELAXED);
+    }
+
+    return rc;
 }
 
 /*****************************************************************************/
@@ -74,14 +90,28 @@ trans_tls_can_recv(struct trans *self, int sck, int millis)
 int
 trans_tcp_recv(struct trans *self, char *ptr, int len)
 {
-    return g_tcp_recv(self->sck, ptr, len, 0);
+    int rc = g_tcp_recv(self->sck, ptr, len, 0);
+
+    if (rc > 0)
+    {
+        __atomic_add_fetch(&self->rx_bytes, (uint64_t) rc, __ATOMIC_RELAXED);
+    }
+
+    return rc;
 }
 
 /*****************************************************************************/
 int
 trans_tcp_send(struct trans *self, const char *data, int len)
 {
-    return g_tcp_send(self->sck, data, len, 0);
+    int rc = g_tcp_send(self->sck, data, len, 0);
+
+    if (rc > 0)
+    {
+        __atomic_add_fetch(&self->tx_bytes, (uint64_t) rc, __ATOMIC_RELAXED);
+    }
+
+    return rc;
 }
 
 /*****************************************************************************/

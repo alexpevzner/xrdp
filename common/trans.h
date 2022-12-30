@@ -117,6 +117,7 @@ struct trans
     trans_can_recv_proc trans_can_recv;
     struct source_info *si;
     enum xrdp_source my_source;
+    volatile uint64_t tx_bytes, rx_bytes; /* statistics counters */
 };
 
 struct trans *

@@ -76,6 +76,15 @@ struct xrdp_session
 
     struct source_info si;
     char *xrdp_ini; /* path to xrdp.ini */
+
+    /* Performance instrumentation configuration */
+    int perf_dump_interval;
+
+    /* Performance instrumentation thread */
+    tbus perf_thread_term;
+
+    /* Statistic counters */
+    volatile uint64_t tx_frames;
 };
 
 struct xrdp_drdynvc_procs
